@@ -1,0 +1,85 @@
+name: Run Selenium Script from API Request
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'API URL to send the download back to'
+        required: true
+        type: string
+      selenium_script:
+        description: 'Selenium script to execute'
+        required: true
+        type: string
+
+jobs:
+  run-selenium-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout repository (if needed)
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # Step 3: Install required dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium undetected-chromedriver requests
+
+      # Step 4: Write the Selenium script to a file
+      - name: Create Selenium Script File
+        run: |
+          # Create the base part of the script and write it to the file
+          cat <<EOF > selenium_script.py
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.webdriver import WebDriver
+from selenium.webdriver.common.keys import Keys
+import time
+
+# Disable destructors to prevent WinError 6
+WebDriver.__del__ = lambda self: None
+uc.Chrome.__del__ = lambda self: None
+EOF
+
+          # Append the dynamic selenium_script passed by the API
+          echo "${{ github.event.inputs.selenium_script }}" >> selenium_script.py
+
+      # Step 5: Run the generated Selenium script
+      - name: Run Selenium Script
+        run: |
+          python selenium_script.py
+        continue-on-error: true  # In case of failure, continue with the next steps
+
+      # Step 6: Move the downloaded file to the GitHub workspace (adjust path as needed)
+      - name: Find and move the downloaded file
+        run: |
+          # Assuming the file is saved in the default download directory, e.g., /root/Downloads or a custom path
+          # Update the path to the correct location where your Selenium script saves the file
+          mkdir -p $GITHUB_WORKSPACE/downloads  # Ensure the downloads directory exists
+          # Assuming the downloaded file is named 'downloaded_file.xlsx'
+          mv /root/Downloads/downloaded_file.xlsx $GITHUB_WORKSPACE/downloads/file.xlsx || echo "File not found"  # Adjust path as necessary
+
+      # Step 7: Upload the downloaded file as an artifact for debugging or further inspection
+      - name: Upload the downloaded file as artifact (for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: selenium-download
+          path: $GITHUB_WORKSPACE/downloads/file.xlsx
+
+      # Step 8: Send the downloaded file back to the provided API URL
+      - name: Send response to API
+        run: |
+          curl -X POST \
+            -F "file=@$GITHUB_WORKSPACE/downloads/file.xlsx" \  # Path to the downloaded file
+            -F "api_key=YOUR_API_KEY" \  # Replace with your actual API key or authentication method
+            ${{ github.event.inputs.api_url }}  # Send the file to the API URL
