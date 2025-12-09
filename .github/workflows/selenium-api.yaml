@@ -33,45 +33,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install selenium undetected-chromedriver requests
 
-      # Step 4: Write the Selenium script to a file
-      - name: Create Selenium Script File
-        run: |
-          cat <<EOF > selenium_script.py
-          import undetected_chromedriver as uc
-          from selenium.webdriver.common.by import By
-          from selenium.webdriver.support.ui import WebDriverWait
-          from selenium.webdriver.support import expected_conditions as EC
-          from selenium.webdriver.chrome.webdriver import WebDriver
-          from selenium.webdriver.common.keys import Keys
-          import time
-
-          # Disable destructors to prevent WinError 6
-          WebDriver.__del__ = lambda self: None
-          uc.Chrome.__del__ = lambda self: None
-          EOF
-
-          echo "${{ github.event.inputs.selenium_script }}" >> selenium_script.py
-
-      # Step 5: Run the generated Selenium script
+      # Step 4: Run the user's Selenium script directly
       - name: Run Selenium Script
         run: |
-          python selenium_script.py
-        continue-on-error: true  # In case of failure, continue with the next steps
+          python -c "${{ github.event.inputs.selenium_script }}"
 
-      # Step 6: Move the downloaded file to the GitHub workspace (adjust path as needed)
+      # Step 5: Move the downloaded file to the GitHub workspace (adjust path as needed)
       - name: Find and move the downloaded file
         run: |
           mkdir -p $GITHUB_WORKSPACE/downloads  # Ensure the downloads directory exists
           mv /root/Downloads/downloaded_file.xlsx $GITHUB_WORKSPACE/downloads/file.xlsx || echo "File not found"  # Adjust path as necessary
 
-      # Step 7: Upload the downloaded file as artifact for debugging or further inspection
+      # Step 6: Upload the downloaded file as an artifact for debugging or further inspection
       - name: Upload the downloaded file as artifact (for debugging)
         uses: actions/upload-artifact@v4
         with:
           name: selenium-download
           path: $GITHUB_WORKSPACE/downloads/file.xlsx
 
-      # Step 8: Send response to API
+      # Step 7: Send response to API
       - name: Send response to API
         run: |
           curl -X POST \
