@@ -33,25 +33,30 @@ jobs:
           python -m pip install --upgrade pip
           pip install selenium undetected-chromedriver requests
 
-      # Step 4: Run the user's Selenium script directly
+      # Step 4: Write the Selenium script to a file
+      - name: Write Selenium Script to File
+        run: |
+          echo "${{ github.event.inputs.selenium_script }}" > selenium_script.py
+
+      # Step 5: Run the generated Selenium script
       - name: Run Selenium Script
         run: |
-          python -c "${{ github.event.inputs.selenium_script }}"
+          python selenium_script.py
 
-      # Step 5: Move the downloaded file to the GitHub workspace (adjust path as needed)
+      # Step 6: Move the downloaded file to the GitHub workspace (adjust path as needed)
       - name: Find and move the downloaded file
         run: |
           mkdir -p $GITHUB_WORKSPACE/downloads  # Ensure the downloads directory exists
           mv /root/Downloads/downloaded_file.xlsx $GITHUB_WORKSPACE/downloads/file.xlsx || echo "File not found"  # Adjust path as necessary
 
-      # Step 6: Upload the downloaded file as an artifact for debugging or further inspection
+      # Step 7: Upload the downloaded file as an artifact for debugging or further inspection
       - name: Upload the downloaded file as artifact (for debugging)
         uses: actions/upload-artifact@v4
         with:
           name: selenium-download
           path: $GITHUB_WORKSPACE/downloads/file.xlsx
 
-      # Step 7: Send response to API
+      # Step 8: Send response to API
       - name: Send response to API
         run: |
           curl -X POST \
