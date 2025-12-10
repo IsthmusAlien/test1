@@ -57,6 +57,8 @@ jobs:
         id: run_selenium
         continue-on-error: true
         run: |
+          # Create debug directory first
+          mkdir -p $GITHUB_WORKSPACE/debug
           python selenium_script.py || echo "SCRIPT_FAILED=true" >> $GITHUB_ENV
 
       # Step 8: Find and move the downloaded file (if successful)
@@ -77,27 +79,53 @@ jobs:
             touch $GITHUB_WORKSPACE/downloads/file.xlsx
           fi
 
-      # Step 9: Upload debug files as artifact (always)
+      # Step 9: Check for debug files and prepare them for upload
+      - name: Prepare debug files for upload
+        run: |
+          echo "Checking for debug files..."
+          
+          # Create debug directory if it doesn't exist
+          mkdir -p $GITHUB_WORKSPACE/debug
+          
+          # List files in debug directory
+          echo "Files in debug directory:"
+          ls -la $GITHUB_WORKSPACE/debug/ || echo "Debug directory empty or doesn't exist"
+          
+          # Count files in debug directory
+          file_count=$(find $GITHUB_WORKSPACE/debug/ -type f 2>/dev/null | wc -l || echo "0")
+          echo "Number of debug files found: $file_count"
+          
+          if [ "$file_count" -eq "0" ]; then
+            echo "No debug files found. Creating a placeholder file with error info."
+            echo "No debug files were generated during script execution." > $GITHUB_WORKSPACE/debug/no_debug_files.txt
+            echo "Script status: ${{ job.status }}" >> $GITHUB_WORKSPACE/debug/no_debug_files.txt
+            echo "SCRIPT_FAILED: $SCRIPT_FAILED" >> $GITHUB_WORKSPACE/debug/no_debug_files.txt
+            echo "Timestamp: $(date)" >> $GITHUB_WORKSPACE/debug/no_debug_files.txt
+          fi
+
+      # Step 10: Upload debug files as artifact (always)
       - name: Upload debug files
         uses: actions/upload-artifact@v4
         with:
           name: debug-files
           path: $GITHUB_WORKSPACE/debug/
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
-      # Step 10: Upload downloaded file as artifact (if successful)
+      # Step 11: Upload downloaded file as artifact (if successful)
       - name: Upload downloaded file
         if: env.SCRIPT_FAILED != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: selenium-download
           path: $GITHUB_WORKSPACE/downloads/file.xlsx
+          if-no-files-found: warn
 
-      # Step 11: Send file to API if successful
+      # Step 12: Send file to API if successful
       - name: Send file to API
         if: env.SCRIPT_FAILED != 'true'
         run: |
           if [ -s "$GITHUB_WORKSPACE/downloads/file.xlsx" ]; then
+            echo "Sending downloaded file to API..."
             curl -X POST \
               -F "file=@$GITHUB_WORKSPACE/downloads/file.xlsx" \
               -F "success=true" \
@@ -111,31 +139,47 @@ jobs:
               ${{ github.event.inputs.api_url }}
           fi
 
-      # Step 12: Handle failure - Upload debug files to API
+      # Step 13: Handle failure - Upload debug files to API
       - name: Send debug files to API on failure
         if: failure() || env.SCRIPT_FAILED == 'true'
         run: |
-          echo "Script failed. Uploading debug files..."
+          echo "Script failed. Checking for debug files to upload to API..."
           
-          # Check if debug directory exists
+          # Check if debug directory exists and has files
           if [ -d "$GITHUB_WORKSPACE/debug" ]; then
-            echo "Found debug directory, uploading files to API..."
+            echo "Found debug directory"
             
-            # Get the latest screenshot and HTML file
-            latest_png=$(ls -t $GITHUB_WORKSPACE/debug/*.png 2>/dev/null | head -1)
-            latest_html=$(ls -t $GITHUB_WORKSPACE/debug/*.html 2>/dev/null | head -1)
+            # Get all debug files
+            debug_files=$(find $GITHUB_WORKSPACE/debug/ -type f -name "*.png" -o -name "*.html" -o -name "*.txt" 2>/dev/null)
             
-            if [ -n "$latest_png" ] && [ -n "$latest_html" ]; then
-              echo "Uploading $latest_png and $latest_html to API..."
-              curl -X POST \
-                -F "screenshot=@$latest_png" \
-                -F "html=@$latest_html" \
-                -F "status=failed" \
-                -F "error_message=Script failed - check debug files" \
-                ${{ github.event.inputs.api_url }}
+            if [ -n "$debug_files" ]; then
+              echo "Debug files found:"
+              echo "$debug_files"
+              
+              # Get the latest screenshot
+              latest_png=$(ls -t $GITHUB_WORKSPACE/debug/*.png 2>/dev/null | head -1)
+              latest_html=$(ls -t $GITHUB_WORKSPACE/debug/*.html 2>/dev/null | head -1)
+              
+              if [ -n "$latest_png" ] && [ -f "$latest_png" ]; then
+                echo "Uploading $latest_png to API..."
+                curl -X POST \
+                  -F "screenshot=@$latest_png" \
+                  -F "status=failed" \
+                  -F "error_message=Script failed - see screenshot" \
+                  ${{ github.event.inputs.api_url }}
+              elif [ -n "$latest_html" ] && [ -f "$latest_html" ]; then
+                echo "Uploading $latest_html to API..."
+                curl -X POST \
+                  -F "html=@$latest_html" \
+                  -F "status=failed" \
+                  -F "error_message=Script failed - see HTML" \
+                  ${{ github.event.inputs.api_url }}
+              else
+                echo "No suitable debug files found for upload"
+              fi
             else
-              echo "No debug files found to upload"
+              echo "No debug files found in debug directory"
             fi
           else
-            echo "No debug directory found"
+            echo "Debug directory doesn't exist"
           fi
