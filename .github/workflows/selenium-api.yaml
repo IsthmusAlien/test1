@@ -41,10 +41,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install selenium undetected-chromedriver requests webdriver-manager
 
-      # Step 5: Set up environment variable for API URL
-      - name: Set API URL environment variable
+      # Step 5: Set up environment variables
+      - name: Set environment variables
         run: |
           echo "API_URL=${{ github.event.inputs.api_url }}" >> $GITHUB_ENV
+          echo "GITHUB_WORKSPACE=${{ github.workspace }}" >> $GITHUB_ENV
 
       # Step 6: Write the Selenium script to a file
       - name: Write Selenium Script to File
@@ -76,15 +77,23 @@ jobs:
             touch $GITHUB_WORKSPACE/downloads/file.xlsx
           fi
 
-      # Step 9: Upload artifact for debugging
-      - name: Upload artifact
+      # Step 9: Upload debug files as artifact (always)
+      - name: Upload debug files
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-files
+          path: $GITHUB_WORKSPACE/debug/
+          if-no-files-found: ignore
+
+      # Step 10: Upload downloaded file as artifact (if successful)
+      - name: Upload downloaded file
         if: env.SCRIPT_FAILED != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: selenium-download
           path: $GITHUB_WORKSPACE/downloads/file.xlsx
 
-      # Step 10: Send file to API if successful
+      # Step 11: Send file to API if successful
       - name: Send file to API
         if: env.SCRIPT_FAILED != 'true'
         run: |
@@ -102,9 +111,31 @@ jobs:
               ${{ github.event.inputs.api_url }}
           fi
 
-      # Step 11: Handle failure - Send failure notification
-      - name: Send failure notification
+      # Step 12: Handle failure - Upload debug files to API
+      - name: Send debug files to API on failure
         if: failure() || env.SCRIPT_FAILED == 'true'
         run: |
-          echo "Script failed. Screenshot should have been sent from within the script."
-          # You can add additional failure handling here if needed
+          echo "Script failed. Uploading debug files..."
+          
+          # Check if debug directory exists
+          if [ -d "$GITHUB_WORKSPACE/debug" ]; then
+            echo "Found debug directory, uploading files to API..."
+            
+            # Get the latest screenshot and HTML file
+            latest_png=$(ls -t $GITHUB_WORKSPACE/debug/*.png 2>/dev/null | head -1)
+            latest_html=$(ls -t $GITHUB_WORKSPACE/debug/*.html 2>/dev/null | head -1)
+            
+            if [ -n "$latest_png" ] && [ -n "$latest_html" ]; then
+              echo "Uploading $latest_png and $latest_html to API..."
+              curl -X POST \
+                -F "screenshot=@$latest_png" \
+                -F "html=@$latest_html" \
+                -F "status=failed" \
+                -F "error_message=Script failed - check debug files" \
+                ${{ github.event.inputs.api_url }}
+            else
+              echo "No debug files found to upload"
+            fi
+          else
+            echo "No debug directory found"
+          fi
