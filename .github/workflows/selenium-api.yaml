@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout repository (if needed)
+      # Step 1: Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: '3.9'
 
-      # Step 3: Install Chrome browser (ensure it's available)
+      # Step 3: Install Chrome browser
       - name: Install Chrome
         run: |
           wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
@@ -39,26 +39,32 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install selenium undetected-chromedriver requests
+          pip install selenium undetected-chromedriver requests webdriver-manager
 
-      # Step 5: Write the Selenium script to a file
+      # Step 5: Set up environment variable for API URL
+      - name: Set API URL environment variable
+        run: |
+          echo "API_URL=${{ github.event.inputs.api_url }}" >> $GITHUB_ENV
+
+      # Step 6: Write the Selenium script to a file
       - name: Write Selenium Script to File
         run: |
           echo "${{ github.event.inputs.selenium_script }}" > selenium_script.py
 
-      # Step 6: Run the generated Selenium script
+      # Step 7: Run the generated Selenium script with error handling
       - name: Run Selenium Script
+        id: run_selenium
+        continue-on-error: true
         run: |
-          python selenium_script.py
+          python selenium_script.py || echo "SCRIPT_FAILED=true" >> $GITHUB_ENV
 
-      # Step 7: Find and move the downloaded file
+      # Step 8: Find and move the downloaded file (if successful)
       - name: Find downloaded file
+        if: env.SCRIPT_FAILED != 'true'
         run: |
-          # Create downloads directory
           mkdir -p $GITHUB_WORKSPACE/downloads
           
           # Try to find the Excel file in common download locations
-          # You may need to adjust the filename pattern based on what Xero exports
           find /home/runner/ -name "*.xlsx" -type f | head -1 | xargs -I {} cp {} $GITHUB_WORKSPACE/downloads/file.xlsx 2>/dev/null || true
           find /tmp/ -name "*.xlsx" -type f | head -1 | xargs -I {} cp {} $GITHUB_WORKSPACE/downloads/file.xlsx 2>/dev/null || true
           
@@ -70,21 +76,35 @@ jobs:
             touch $GITHUB_WORKSPACE/downloads/file.xlsx
           fi
 
-      # Step 8: Upload the downloaded file as an artifact for debugging
+      # Step 9: Upload artifact for debugging
       - name: Upload artifact
+        if: env.SCRIPT_FAILED != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: selenium-download
           path: $GITHUB_WORKSPACE/downloads/file.xlsx
 
-      # Step 9: Send response to API
-      - name: Send response to API
+      # Step 10: Send file to API if successful
+      - name: Send file to API
+        if: env.SCRIPT_FAILED != 'true'
         run: |
           if [ -s "$GITHUB_WORKSPACE/downloads/file.xlsx" ]; then
             curl -X POST \
               -F "file=@$GITHUB_WORKSPACE/downloads/file.xlsx" \
-              -F "api_key=YOUR_API_KEY" \
+              -F "success=true" \
+              -F "message=File downloaded successfully" \
               ${{ github.event.inputs.api_url }}
           else
             echo "No file to send or file is empty"
+            curl -X POST \
+              -F "success=false" \
+              -F "message=No file was downloaded" \
+              ${{ github.event.inputs.api_url }}
           fi
+
+      # Step 11: Handle failure - Send failure notification
+      - name: Send failure notification
+        if: failure() || env.SCRIPT_FAILED == 'true'
+        run: |
+          echo "Script failed. Screenshot should have been sent from within the script."
+          # You can add additional failure handling here if needed
