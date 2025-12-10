@@ -84,16 +84,6 @@ jobs:
             touch $GITHUB_WORKSPACE/downloads/file.xlsx
           fi
 
-      # Step 9: Upload files as artifacts
-      - name: Upload screenshots as artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: selenium-screenshots
-          path: |
-            ${{ github.workspace }}/screenshots/
-            ${{ github.workspace }}/page_sources/
-          if-no-files-found: ignore
-
       - name: Upload downloaded file as artifact
         if: env.SCRIPT_FAILED != 'true'
         uses: actions/upload-artifact@v4
