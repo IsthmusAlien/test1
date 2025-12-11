@@ -16,7 +16,7 @@ jobs:
   run-selenium-script:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Added this to allow committing to repo
+      contents: write
 
     steps:
       # Step 1: Checkout repository
@@ -56,56 +56,31 @@ jobs:
         run: |
           echo "${{ github.event.inputs.selenium_script }}" > selenium_script.py
 
-      # Step 7: Run the generated Selenium script with error handling
+      # Step 7: Run the generated Selenium script
       - name: Run Selenium Script
         id: run_selenium
-        continue-on-error: true
         run: |
-          # Create directories first
-          mkdir -p $GITHUB_WORKSPACE/screenshots
-          mkdir -p $GITHUB_WORKSPACE/page_sources
-          python selenium_script.py || echo "SCRIPT_FAILED=true" >> $GITHUB_ENV
+          echo "Starting Selenium script execution..."
+          python selenium_script.py
+          echo "SCRIPT_SUCCESS=true" >> $GITHUB_ENV
 
-      # Step 8: Find and move the downloaded file (if successful)
-      - name: Find downloaded file
-        if: env.SCRIPT_FAILED != 'true'
+      # Step 8: Report success to API (if script didn't already)
+      - name: Report Success
+        if: success() && env.SCRIPT_SUCCESS == 'true'
         run: |
-          mkdir -p $GITHUB_WORKSPACE/downloads
-          
-          # Try to find the Excel file in common download locations
-          find /home/runner/ -name "*.xlsx" -type f | head -1 | xargs -I {} cp {} $GITHUB_WORKSPACE/downloads/file.xlsx 2>/dev/null || true
-          find /tmp/ -name "*.xlsx" -type f | head -1 | xargs -I {} cp {} $GITHUB_WORKSPACE/downloads/file.xlsx 2>/dev/null || true
-          
-          # Check if file was found
-          if [ -f "$GITHUB_WORKSPACE/downloads/file.xlsx" ]; then
-            echo "File downloaded successfully"
-          else
-            echo "No Excel file found. Creating empty file for debugging."
-            touch $GITHUB_WORKSPACE/downloads/file.xlsx
-          fi
+          echo "Script completed successfully"
+          # The script already sends files to the API, so we just log success here
 
-      - name: Upload downloaded file as artifact
-        if: env.SCRIPT_FAILED != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: selenium-download
-          path: ${{ github.workspace }}/downloads/file.xlsx
-          if-no-files-found: ignore
-
-      - name: Send file to API
-        if: env.SCRIPT_FAILED != 'true'
+      # Step 9: Report failure to API
+      - name: Report Failure
+        if: failure()
         run: |
-          if [ -s "${{ github.workspace }}/downloads/file.xlsx" ]; then
-            echo "Sending downloaded file to API..."
-            curl -X POST \
-              -F "file=@${{ github.workspace }}/downloads/file.xlsx" \
-              -F "success=true" \
-              -F "message=File downloaded successfully" \
-              ${{ github.event.inputs.api_url }}
-          else
-            echo "No file to send or file is empty"
-            curl -X POST \
-              -F "success=false" \
-              -F "message=No file was downloaded" \
-              ${{ github.event.inputs.api_url }}
-          fi
+          echo "Script failed, sending failure notification to API..."
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d '{
+              "success": false,
+              "message": "Selenium script execution failed",
+              "workflow_run_id": "${{ github.run_id }}"
+            }' \
+            ${{ github.event.inputs.api_url }} || echo "Failed to send error notification"
