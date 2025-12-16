@@ -55,8 +55,8 @@ jobs:
       - name: Write Selenium Script to File
         run: |
           cat << 'EOF' > selenium_script.py
-      ${{ github.event.inputs.selenium_script }}
-      EOF
+          ${{ github.event.inputs.selenium_script }}
+          EOF
 
       # Step 7: Run the generated Selenium script
       - name: Run Selenium Script
