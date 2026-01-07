@@ -1,0 +1,159 @@
+name: Run Selenium Script from API Request
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'API URL to send the download back to'
+        required: true
+        type: string
+      selenium_script:
+        description: 'Selenium script to execute'
+        required: true
+        type: string
+
+jobs:
+  run-selenium-script:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # Step 1: Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 2: Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # Step 3: Install Chrome browser
+      - name: Install Chrome
+        run: |
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
+      # Step 4: Install required dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium undetected-chromedriver requests webdriver-manager pyotp
+
+      # Step 5: Set up environment variables
+      - name: Set environment variables
+        run: |
+          echo "API_URL=${{ github.event.inputs.api_url }}" >> $GITHUB_ENV
+          echo "GITHUB_WORKSPACE=${{ github.workspace }}" >> $GITHUB_ENV
+          
+      # Step 6: Write the Selenium script to a file
+      - name: Write Selenium Script to File
+        run: |
+          # Use base64 encoding to handle special characters
+          echo "${{ github.event.inputs.selenium_script }}" > script_content.txt
+          
+          # Decode and write to Python file
+          python -c "
+          import base64
+          import sys
+          
+          # Read the script content
+          with open('script_content.txt', 'r') as f:
+              content = f.read()
+          
+          # Write to Python file
+          with open('selenium_script.py', 'w') as f:
+              f.write(content)
+          "
+
+      # Step 7: Run the generated Selenium script
+      - name: Run Selenium Script
+        id: run_selenium
+        run: |
+          echo "Starting Selenium script execution..."
+          python selenium_script.py
+          echo "SCRIPT_SUCCESS=true" >> $GITHUB_ENV
+
+      # Step 8: Save screenshot to new_ss folder on failure
+      - name: Save Screenshot to new_ss Folder
+        if: failure()
+        run: |
+          echo "Script failed, checking for screenshot..."
+          
+          if [ -f "error_screenshot.png" ]; then
+            echo "Screenshot found, saving to new_ss folder..."
+            
+            # Create a unique filename with timestamp and run ID
+            TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+            RUN_ID="${{ github.run_id }}"
+            SCREENSHOT_NAME="error_${RUN_ID}_${TIMESTAMP}.png"
+            
+            # Create new_ss folder if it doesn't exist
+            mkdir -p new_ss
+            
+            # Move screenshot to new_ss directory
+            mv error_screenshot.png "new_ss/${SCREENSHOT_NAME}"
+            
+            # Configure git
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            
+            # Pull latest changes first to avoid conflicts
+            git pull origin main --rebase || true
+            
+            # Add and commit the screenshot
+            git add "new_ss/${SCREENSHOT_NAME}"
+            git commit -m "Add error screenshot from failed run ${RUN_ID} - ${TIMESTAMP}"
+            git push origin main
+            
+            echo "Screenshot saved to repository: new_ss/${SCREENSHOT_NAME}"
+            
+            # Create screenshot URL
+            SCREENSHOT_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/new_ss/${SCREENSHOT_NAME}"
+            echo "Screenshot URL: ${SCREENSHOT_URL}"
+            
+            # Send notification with screenshot URL
+            curl -X POST \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"success\": false,
+                \"message\": \"Selenium script execution failed\",
+                \"workflow_run_id\": \"${RUN_ID}\",
+                \"screenshot_url\": \"${SCREENSHOT_URL}\",
+                \"timestamp\": \"${TIMESTAMP}\",
+                \"filename\": \"${SCREENSHOT_NAME}\"
+              }" \
+              ${{ github.event.inputs.api_url }} || echo "Failed to send error notification"
+          else
+            echo "No screenshot found"
+            # Send notification without screenshot
+            curl -X POST \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"success\": false,
+                \"message\": \"Selenium script execution failed (no screenshot captured)\",
+                \"workflow_run_id\": \"${{ github.run_id }}\"
+              }" \
+              ${{ github.event.inputs.api_url }} || echo "Failed to send error notification"
+          fi
+
+      # Step 9: Upload screenshot as artifact (optional backup)
+      - name: Upload Screenshot Artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selenium-error-screenshots
+          path: new_ss/
+          if-no-files-found: ignore
+
+      # Step 10: Report success
+      - name: Report Success
+        if: success() && env.SCRIPT_SUCCESS == 'true'
+        run: |
+          echo "Script completed successfully"
+          # The script already sends files to the API, so we just log success here
