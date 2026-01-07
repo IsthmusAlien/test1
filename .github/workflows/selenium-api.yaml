@@ -51,25 +51,12 @@ jobs:
           echo "API_URL=${{ github.event.inputs.api_url }}" >> $GITHUB_ENV
           echo "GITHUB_WORKSPACE=${{ github.workspace }}" >> $GITHUB_ENV
           
-      # Step 6: Write the Selenium script to a file (FIXED)
+      # Step 6: Write the Selenium script to a file
       - name: Write Selenium Script to File
         run: |
-          # Use base64 encoding to handle special characters
-          echo "${{ github.event.inputs.selenium_script }}" > script_content.txt
-          
-          # Decode and write to Python file
-          python -c "
-          import base64
-          import sys
-          
-          # Read the script content
-          with open('script_content.txt', 'r') as f:
-              content = f.read()
-          
-          # Write to Python file
-          with open('selenium_script.py', 'w') as f:
-              f.write(content)
-          "
+          cat << 'EOF' > selenium_script.py
+          ${{ github.event.inputs.selenium_script }}
+          EOF
 
       # Step 7: Run the generated Selenium script
       - name: Run Selenium Script
