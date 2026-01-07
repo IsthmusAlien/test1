@@ -43,7 +43,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install selenium undetected-chromedriver requests webdriver-manager pyotp
+          pip install selenium undetected_chromedriver requests webdriver-manager pyotp
 
       # Step 5: Set up environment variables
       - name: Set environment variables
@@ -79,42 +79,52 @@ jobs:
           python selenium_script.py
           echo "SCRIPT_SUCCESS=true" >> $GITHUB_ENV
 
-      # Step 8: Save screenshot to new_ss folder on failure
+      # Step 8: Create new_ss folder and save screenshot
       - name: Save Screenshot to new_ss Folder
         if: failure()
         run: |
           echo "Script failed, checking for screenshot..."
           
           if [ -f "error_screenshot.png" ]; then
-            echo "Screenshot found, saving to new_ss folder..."
+            echo "Screenshot found, preparing to save to new_ss folder..."
             
             # Create a unique filename with timestamp and run ID
             TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
             RUN_ID="${{ github.run_id }}"
             SCREENSHOT_NAME="error_${RUN_ID}_${TIMESTAMP}.png"
             
-            # Create new_ss folder if it doesn't exist
+            echo "Creating new_ss folder..."
+            # Create new_ss folder in workspace
             mkdir -p new_ss
             
+            echo "Moving screenshot to new_ss/${SCREENSHOT_NAME}..."
             # Move screenshot to new_ss directory
             mv error_screenshot.png "new_ss/${SCREENSHOT_NAME}"
             
+            echo "Configuring git..."
             # Configure git
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
             
-            # Pull latest changes first to avoid conflicts
-            git pull origin main --rebase || true
+            echo "Checking git status..."
+            git status
             
-            # Add and commit the screenshot
-            git add "new_ss/${SCREENSHOT_NAME}"
-            git commit -m "Add error screenshot from failed run ${RUN_ID} - ${TIMESTAMP}"
-            git push origin main
+            echo "Adding screenshot to git..."
+            # Add the new_ss folder and screenshot
+            git add new_ss/
+            
+            echo "Committing changes..."
+            # Commit the screenshot
+            git commit -m "Add error screenshot from failed run ${RUN_ID} [${TIMESTAMP}]" || echo "No changes to commit"
+            
+            echo "Pushing to repository..."
+            # Push to repository
+            git push origin HEAD
             
             echo "Screenshot saved to repository: new_ss/${SCREENSHOT_NAME}"
             
             # Create screenshot URL
-            SCREENSHOT_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/new_ss/${SCREENSHOT_NAME}"
+            SCREENSHOT_URL="https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/new_ss/${SCREENSHOT_NAME}"
             echo "Screenshot URL: ${SCREENSHOT_URL}"
             
             # Send notification with screenshot URL
@@ -122,15 +132,23 @@ jobs:
               -H "Content-Type: application/json" \
               -d "{
                 \"success\": false,
-                \"message\": \"Selenium script execution failed\",
+                \"message\": \"Selenium script execution failed - Screenshot saved\",
                 \"workflow_run_id\": \"${RUN_ID}\",
                 \"screenshot_url\": \"${SCREENSHOT_URL}\",
                 \"timestamp\": \"${TIMESTAMP}\",
                 \"filename\": \"${SCREENSHOT_NAME}\"
               }" \
               ${{ github.event.inputs.api_url }} || echo "Failed to send error notification"
+            
+            # Also save screenshot URL to a file for debugging
+            echo "${SCREENSHOT_URL}" > screenshot_url.txt
+            
           else
-            echo "No screenshot found"
+            echo "No screenshot found at error_screenshot.png"
+            # List files in current directory for debugging
+            echo "Current directory contents:"
+            ls -la
+            
             # Send notification without screenshot
             curl -X POST \
               -H "Content-Type: application/json" \
@@ -142,13 +160,15 @@ jobs:
               ${{ github.event.inputs.api_url }} || echo "Failed to send error notification"
           fi
 
-      # Step 9: Upload screenshot as artifact (optional backup)
+      # Step 9: Upload screenshot as artifact
       - name: Upload Screenshot Artifact
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: selenium-error-screenshots
-          path: new_ss/
+          path: |
+            new_ss/
+            screenshot_url.txt
           if-no-files-found: ignore
 
       # Step 10: Report success
@@ -156,4 +176,3 @@ jobs:
         if: success() && env.SCRIPT_SUCCESS == 'true'
         run: |
           echo "Script completed successfully"
-          # The script already sends files to the API, so we just log success here
